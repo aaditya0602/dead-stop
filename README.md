@@ -1,6 +1,6 @@
 # DEAD STOP
 
-**[Play it here](https://aaditya0602.github.io/dead-stop/)**
+**[Play it here](https://aaditya0602.github.io/dead-stop/)** · **[itch.io page](https://aaditya0602.itch.io/dead-stop)**
 
 > The world moves only as fast as you do.
 

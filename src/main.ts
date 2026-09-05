@@ -1,10 +1,11 @@
 import kaplay from "kaplay";
 import type { Vec2 } from "kaplay";
-import { initAudio, isMuted, toggleMute, sfxMove, sfxDeath, sfxTick, sfxStart } from "./audio";
+import { initAudio, isMuted, toggleMute, sfxMove, sfxDeath, sfxTick, sfxStart, sfxNearMiss } from "./audio";
 import {
   W, H, PLAYER_R, HAZARD_R, TELEGRAPH_LEAD, GHOST_LIFE, GHOST_STEP, HIT_STOP, SHAKE_TIME, SHAKE_MAG,
+  NEAR_MISS_MARGIN, GRAZE_FLASH_TIME,
   CO, col, loadBest, saveBest, drawArenaFrame, drawEdgeFlash, drawGhosts, drawTelegraphs, drawFrags,
-  burst, stepFrags,
+  drawGrazeRing, burst, stepFrags,
 } from "./fx";
 import type { Telegraph, Ghost, Frag } from "./fx";
 
@@ -21,6 +22,10 @@ const k = kaplay({
 
 const MAX_SPEED = 260;
 const MIN_TIME_SCALE = 0.05;
+// Matches kaplay's circle-vs-circle area() overlap test used by onCollide.
+// A hazard whose center is farther than this, but within COLLIDE_DIST +
+// NEAR_MISS_MARGIN, grazed the player without touching it.
+const COLLIDE_DIST = PLAYER_R + HAZARD_R;
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const muteLabel = () => (isMuted() ? "MUTED" : "SOUND ON");
@@ -113,6 +118,8 @@ k.scene("game", () => {
   let spawnAcc = 0;
   let ghostAcc = 0;
   let tickFlash = 0;
+  let grazeFlash = 0;
+  let nearMisses = 0;
 
   // death-sequence state, all advanced on UNSCALED dt()
   let hitStop = 0;
@@ -132,7 +139,10 @@ k.scene("game", () => {
     k.add([k.pos(p), k.circle(r), k.opacity(0), k.area(), k.anchor("center"), tag]);
   type Body = ReturnType<typeof makeBody>;
 
-  const hazards: { o: Body; vel: Vec2 }[] = [];
+  // spinPhase/sizeMul are draw-only flourish (see onDraw) - they never touch
+  // the collider, which stays exactly HAZARD_R via makeBody. grazed debounces
+  // the near-miss effect so one hazard fires it at most once.
+  const hazards: { o: Body; vel: Vec2; spinPhase: number; sizeMul: number; spinT: number; grazed: boolean }[] = [];
   const player = makeBody(k.vec2(W / 2, H / 2), PLAYER_R, "player");
 
   // Spawn geometry is computed HERE, at telegraph time, and carried untouched
@@ -199,6 +209,7 @@ k.scene("game", () => {
     const dtr = k.dt(); // real clock - spawn pipeline and tick flash only
 
     if (tickFlash > 0) tickFlash = Math.max(0, tickFlash - dtr / 0.45);
+    if (grazeFlash > 0) grazeFlash = Math.max(0, grazeFlash - dtr / GRAZE_FLASH_TIME);
 
     // SPAWNING RUNS ON UNSCALED TIME, deliberately. If spawning were scaled,
     // standing still would freeze the world AND stop the threat, making camping
@@ -217,7 +228,10 @@ k.scene("game", () => {
       const tg = telegraphs[i];
       tg.t -= dtr;
       if (tg.t <= 0) {
-        hazards.push({ o: makeBody(tg.from, HAZARD_R, "hazard"), vel: tg.dir.scale(tg.speed) });
+        hazards.push({
+          o: makeBody(tg.from, HAZARD_R, "hazard"), vel: tg.dir.scale(tg.speed),
+          spinPhase: k.rand(0, Math.PI * 2), sizeMul: k.rand(0.85, 1.15), spinT: 0, grazed: false,
+        });
         telegraphs.splice(i, 1);
       }
     }
@@ -227,6 +241,21 @@ k.scene("game", () => {
     for (let i = hazards.length - 1; i >= 0; i--) {
       const h = hazards[i];
       h.o.pos = h.o.pos.add(h.vel.scale(dts));
+      h.spinT += dts; // decorative rotation - respects timeScale like everything else here
+
+      // Near miss: the hazard's center passed close without touching. One-shot
+      // per hazard (grazed), and gated to a real approach - hazards always move,
+      // so entering the band at all means it swept past, not merely existed near.
+      if (!h.grazed) {
+        const dist = h.o.pos.dist(player.pos);
+        if (dist > COLLIDE_DIST && dist < COLLIDE_DIST + NEAR_MISS_MARGIN) {
+          h.grazed = true;
+          nearMisses++;
+          grazeFlash = 1;
+          sfxNearMiss();
+        }
+      }
+
       const p = h.o.pos;
       if (p.x < -m || p.x > W + m || p.y < -m || p.y > H + m) {
         k.destroy(h.o);
@@ -309,13 +338,22 @@ k.scene("game", () => {
     drawTelegraphs(k, telegraphs);
 
     const cHaz = col(k, CO.hazard);
+    const cHazCore = col(k, CO.hazardCore);
+    const cHazRim = col(k, CO.hazardRim);
     for (const h of hazards) {
       // Trail length is a pure function of timeScale: it stretches when you run
       // and collapses to a dot when you crawl. No extra state, no extra writer.
       const tail = h.o.pos.sub(h.vel.scale(0.07 * timeScale));
+      const r = HAZARD_R * h.sizeMul;
       k.drawLine({ p1: tail, p2: h.o.pos, width: HAZARD_R * 1.1, color: cHaz, opacity: 0.28 });
-      k.drawCircle({ pos: h.o.pos, radius: HAZARD_R + 4, color: cHaz, opacity: 0.18 });
-      k.drawCircle({ pos: h.o.pos, radius: HAZARD_R, color: cHaz });
+      k.drawCircle({ pos: h.o.pos, radius: r + 4, color: cHaz, opacity: 0.18 });
+      k.drawCircle({ pos: h.o.pos, radius: r, color: cHaz });
+      k.drawCircle({ pos: h.o.pos, radius: r * 0.55, color: cHazCore });
+      // A single rotating rim highlight sells spin cheaply - no sprite, no
+      // extra collider, purely decorative and gated on the SCALED clock (spinT).
+      const ang = h.spinPhase + h.spinT * 3.2;
+      const hp = h.o.pos.add(k.vec2(Math.cos(ang), Math.sin(ang)).scale(r * 0.72));
+      k.drawCircle({ pos: hp, radius: Math.max(1.5, r * 0.2), color: cHazRim });
     }
 
     if (!shattered) {
@@ -324,6 +362,7 @@ k.scene("game", () => {
         color: col(k, CO.trail), opacity: 0.1 + 0.22 * timeScale,
       });
       k.drawCircle({ pos: player.pos, radius: PLAYER_R, color: col(k, CO.player) });
+      if (grazeFlash > 0) drawGrazeRing(k, player.pos, grazeFlash);
     }
 
     drawFrags(k, frags);
@@ -344,6 +383,9 @@ k.scene("game", () => {
       color: k.rgb(mix(110, 255, timeScale), mix(175, 176, timeScale), mix(255, 60, timeScale)),
     });
     k.drawText({ text: `LV ${level}`, size: 18, pos: k.vec2(14, 80), color: col(k, CO.dim) });
+    if (nearMisses > 0) {
+      k.drawText({ text: `GRAZE ${nearMisses}`, size: 16, pos: k.vec2(14, 100), color: col(k, CO.graze), opacity: 0.85 });
+    }
     if (best > 0) {
       k.drawText({ text: `BEST ${best.toFixed(1)}`, size: 20, pos: k.vec2(W - 14, 12), anchor: "topright", color: col(k, CO.dim) });
     }
@@ -362,7 +404,8 @@ k.scene("game", () => {
         color: col(k, newBest ? CO.warn : CO.dim),
         opacity: newBest ? o * (0.6 + 0.4 * Math.sin(deathT * 7)) : o,
       });
-      k.drawText({ text: "R to restart   -   ESC for title", size: 20, pos: mid(104), anchor: "center", color: col(k, CO.dim), opacity: o });
+      k.drawText({ text: `NEAR MISSES ${nearMisses}`, size: 20, pos: mid(88), anchor: "center", color: col(k, CO.graze), opacity: o });
+      k.drawText({ text: "R to restart   -   ESC for title", size: 20, pos: mid(130), anchor: "center", color: col(k, CO.dim), opacity: o });
     }
   });
 

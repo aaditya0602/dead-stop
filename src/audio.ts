@@ -66,6 +66,22 @@ export function sfxDeath(): void {
   osc.connect(g).connect(m); osc.start(t0); osc.stop(t0 + 0.42);
 }
 
+// A short bright blip for a near miss - higher and thinner than sfxTick's
+// 1800hz square so the two never get mistaken for one another.
+export function sfxNearMiss(): void {
+  const c = ctx, m = master;
+  if (loadMuted() || !c || !m) return;
+  const t0 = c.currentTime;
+  const osc = c.createOscillator(), g = c.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(2600, t0);
+  osc.frequency.exponentialRampToValueAtTime(1900, t0 + 0.08);
+  g.gain.setValueAtTime(0.001, t0);
+  g.gain.linearRampToValueAtTime(0.1, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
+  osc.connect(g).connect(m); osc.start(t0); osc.stop(t0 + 0.11);
+}
+
 export function sfxTick(): void {
   const c = ctx, m = master;
   if (loadMuted() || !c || !m) return;

@@ -27,16 +27,26 @@ export const HIT_STOP = 0.1; // dead-still freeze at the moment of impact
 export const SHAKE_TIME = 0.35;
 export const SHAKE_MAG = 15;
 
+// Near-miss band: a hazard whose center passes within COLLIDE_DIST (touching)
+// plus this margin, but never inside COLLIDE_DIST, counts as a graze. Margin
+// is ~1.8x PLAYER_R, inside the 1.5-2.5x range that reads as "close" without
+// firing on a hazard that was merely somewhere on screen.
+export const NEAR_MISS_MARGIN = PLAYER_R * 1.8;
+export const GRAZE_FLASH_TIME = 0.28; // real-time decay, same treatment as tickFlash
+
 type RGB = readonly [number, number, number];
 export const CO = {
   player: [232, 236, 245],
   trail: [110, 175, 255],
   hazard: [235, 92, 44],
+  hazardCore: [120, 45, 20],
+  hazardRim: [255, 176, 138],
   warn: [255, 176, 60],
-  frame: [40, 40, 55],
+  frame: [92, 97, 124],
   dim: [118, 122, 142],
   white: [255, 255, 255],
   shade: [6, 6, 12],
+  graze: [150, 255, 214],
 } as const;
 
 export function col(k: KAPLAYCtx, c: RGB) {
@@ -113,6 +123,15 @@ export function drawEdgeFlash(k: KAPLAYCtx, a: number): void {
     k.drawRect({ pos: k.vec2(d, 0), width: b, height: H, color: c, opacity: o });
     k.drawRect({ pos: k.vec2(W - d - b, 0), width: b, height: H, color: c, opacity: o });
   }
+}
+
+// Near-miss ring: a quick bright pulse on the player, real-time decay so it
+// reads at any timeScale (same reasoning as the tick edge-flash).
+export function drawGrazeRing(k: KAPLAYCtx, pos: Vec2, a: number): void {
+  if (a <= 0) return;
+  const c = col(k, CO.graze);
+  const r = PLAYER_R + 5 + 16 * (1 - a);
+  k.drawCircle({ pos, radius: r, fill: false, outline: { color: c, width: 1.5 + 2.5 * a }, opacity: a });
 }
 
 // Afterimages. Alpha is squared against the timeScale the ghost was born at, so

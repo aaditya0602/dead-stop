@@ -49,13 +49,15 @@ The prototype used a flat 0.45s from second zero, which was punishing before a f
 
 ## Juice
 
-Screen shake and a white flash on death, wrapped around the world draws only so the HUD never judders. A ~0.1s hit-stop before the shatter, so the hit lands. The player breaks into 14-20 drag-and-fade fragments. Hazards get a speed-proportional trail. A pulsing chevron telegraphs every spawn ~0.5s before it arrives, pointing along the vector the hazard will actually travel — the marker never lies. An edge flash and a tick on each difficulty step.
+Screen shake and a white flash on death, wrapped around the world draws only so the HUD never judders. A ~0.1s hit-stop before the shatter, so the hit lands. The player breaks into 14-20 drag-and-fade fragments. Hazards get a speed-proportional trail, plus a darker core and a rotating rim highlight so a flat orange dot reads as a small solid object rather than a sticker. A pulsing chevron telegraphs every spawn ~0.5s before it arrives, pointing along the vector the hazard will actually travel — the marker never lies. An edge flash and a tick on each difficulty step.
 
 The player's afterimage trail is the visual channel for the core mechanic, and it self-regulates: ghosts are both emitted *and* faded on the scaled clock, so crawling drops one nearly-invisible ghost every twenty frames while full tilt drops one per frame at full alpha. Stop moving and your own wake hangs frozen in the air — your trail obeys the same clock the world does.
 
+**Near misses** get their own feedback, because a graze and nothing happening used to look identical. Any hazard whose center passes within ~1.8x the player's radius without touching it counts as a graze: a bright ring flashes on the player, a high blip plays, and a `GRAZE` counter appears in the HUD (and again on the death screen). Each hazard can trigger this at most once, so a slow-moving hazard lingering nearby doesn't spam the effect.
+
 ## Audio
 
-Every sound is synthesized at runtime with the WebAudio API. **There are zero binary assets in this repository.** A movement whoosh whose pitch and filter cutoff track `timeScale`, a filtered-noise-plus-square death crunch, a tick on each difficulty step, and a two-note start confirm. Mute persists to `localStorage`, as does your best time.
+Every sound is synthesized at runtime with the WebAudio API. **There are zero binary assets in this repository.** A movement whoosh whose pitch and filter cutoff track `timeScale`, a filtered-noise-plus-square death crunch, a tick on each difficulty step, a bright blip on a near miss, and a two-note start confirm. Mute persists to `localStorage`, as does your best time.
 
 ## Build
 
